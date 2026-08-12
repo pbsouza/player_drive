@@ -1,0 +1,6 @@
+{
+  "name": "Drive TV Video Player",
+  "description": "A simple web app designed for Smart TV browsers to browse and play video files directly from Google Drive.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

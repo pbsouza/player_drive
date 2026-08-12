@@ -7,6 +7,9 @@ import {
   User,
   signOut as firebaseSignOut,
   Auth,
+  setPersistence,
+  browserLocalPersistence,
+  inMemoryPersistence,
 } from "firebase/auth";
 import rawFirebaseConfig from "../../firebase-applet-config.json";
 
@@ -20,6 +23,13 @@ try {
   if (firebaseConfig && (firebaseConfig as any).apiKey) {
     app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
     auth = getAuth(app);
+    try {
+      setPersistence(auth, browserLocalPersistence).catch(() => {
+        if (auth) setPersistence(auth, inMemoryPersistence).catch(() => {});
+      });
+    } catch (e) {
+      console.warn("Falha ao configurar persistência inicial do Auth:", e);
+    }
   } else {
     console.warn("Configuração do Firebase não encontrada ou incompleta.");
   }
@@ -96,6 +106,15 @@ export const googleSignIn = async (): Promise<{
   }
   try {
     isSigningIn = true;
+
+    try {
+      await setPersistence(auth, browserLocalPersistence);
+    } catch {
+      try {
+        await setPersistence(auth, inMemoryPersistence);
+      } catch {}
+    }
+
     const result = await signInWithPopup(auth, provider);
     const credential = GoogleAuthProvider.credentialFromResult(result);
     if (!credential?.accessToken) {
@@ -107,6 +126,9 @@ export const googleSignIn = async (): Promise<{
     return { user: result.user, accessToken: cachedAccessToken };
   } catch (error: any) {
     console.error("Erro na autenticação:", error);
+    if (error?.message?.includes("Database is closing") || error?.message?.includes("hidden") || error?.code === "auth/internal-error") {
+      throw new Error("O navegador da TV bloqueou o armazenamento local (IndexedDB). Tente recarregar a página ou desativar o modo privado.");
+    }
     throw error;
   } finally {
     isSigningIn = false;

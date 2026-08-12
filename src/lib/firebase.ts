@@ -6,41 +6,82 @@ import {
   onAuthStateChanged,
   User,
   signOut as firebaseSignOut,
+  Auth,
 } from "firebase/auth";
-import firebaseConfig from "../../firebase-applet-config.json";
+import rawFirebaseConfig from "../../firebase-applet-config.json";
 
-// Initialize Firebase App
-const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
-export const auth = getAuth(app);
+// Safe configuration check
+const firebaseConfig = rawFirebaseConfig || {};
+
+let app;
+let auth: Auth | null = null;
+
+try {
+  if (firebaseConfig && (firebaseConfig as any).apiKey) {
+    app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+    auth = getAuth(app);
+  } else {
+    console.warn("Configuração do Firebase não encontrada ou incompleta.");
+  }
+} catch (err) {
+  console.error("Erro ao inicializar o Firebase App:", err);
+}
 
 const provider = new GoogleAuthProvider();
 provider.addScope("https://www.googleapis.com/auth/drive.readonly");
 
 let isSigningIn = false;
-let cachedAccessToken: string | null =
-  typeof window !== "undefined"
-    ? sessionStorage.getItem("gdrive_access_token")
-    : null;
+
+function getSafeStorageToken(): string | null {
+  try {
+    if (typeof window !== "undefined" && window.sessionStorage) {
+      return sessionStorage.getItem("gdrive_access_token");
+    }
+  } catch (e) {
+    console.warn("sessionStorage não disponível:", e);
+  }
+  return null;
+}
+
+function setSafeStorageToken(token: string | null) {
+  try {
+    if (typeof window !== "undefined" && window.sessionStorage) {
+      if (token) {
+        sessionStorage.setItem("gdrive_access_token", token);
+      } else {
+        sessionStorage.removeItem("gdrive_access_token");
+      }
+    }
+  } catch (e) {
+    console.warn("sessionStorage não disponível:", e);
+  }
+}
+
+let cachedAccessToken: string | null = getSafeStorageToken();
 
 export const initAuth = (
   onAuthSuccess?: (user: User, token: string) => void,
   onAuthFailure?: () => void
 ) => {
+  if (!auth) {
+    if (onAuthFailure) onAuthFailure();
+    return () => {};
+  }
+
   return onAuthStateChanged(auth, async (user: User | null) => {
     if (user) {
-      const storedToken =
-        cachedAccessToken || sessionStorage.getItem("gdrive_access_token");
+      const storedToken = cachedAccessToken || getSafeStorageToken();
       if (storedToken) {
         cachedAccessToken = storedToken;
         if (onAuthSuccess) onAuthSuccess(user, storedToken);
       } else if (!isSigningIn) {
         cachedAccessToken = null;
-        sessionStorage.removeItem("gdrive_access_token");
+        setSafeStorageToken(null);
         if (onAuthFailure) onAuthFailure();
       }
     } else {
       cachedAccessToken = null;
-      sessionStorage.removeItem("gdrive_access_token");
+      setSafeStorageToken(null);
       if (onAuthFailure) onAuthFailure();
     }
   });
@@ -50,6 +91,9 @@ export const googleSignIn = async (): Promise<{
   user: User;
   accessToken: string;
 } | null> => {
+  if (!auth) {
+    throw new Error("O Firebase não foi inicializado. Verifique as credenciais no arquivo firebase-applet-config.json.");
+  }
   try {
     isSigningIn = true;
     const result = await signInWithPopup(auth, provider);
@@ -59,7 +103,7 @@ export const googleSignIn = async (): Promise<{
     }
 
     cachedAccessToken = credential.accessToken;
-    sessionStorage.setItem("gdrive_access_token", credential.accessToken);
+    setSafeStorageToken(credential.accessToken);
     return { user: result.user, accessToken: cachedAccessToken };
   } catch (error: any) {
     console.error("Erro na autenticação:", error);
@@ -70,17 +114,18 @@ export const googleSignIn = async (): Promise<{
 };
 
 export const getAccessToken = async (): Promise<string | null> => {
-  return cachedAccessToken || sessionStorage.getItem("gdrive_access_token");
+  return cachedAccessToken || getSafeStorageToken();
 };
 
 export const clearStoredAccessToken = () => {
   cachedAccessToken = null;
-  if (typeof window !== "undefined") {
-    sessionStorage.removeItem("gdrive_access_token");
-  }
+  setSafeStorageToken(null);
 };
 
 export const logout = async () => {
-  await firebaseSignOut(auth);
+  if (auth) {
+    await firebaseSignOut(auth);
+  }
   clearStoredAccessToken();
 };
+
